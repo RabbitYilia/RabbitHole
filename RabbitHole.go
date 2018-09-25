@@ -1,0 +1,385 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"crypto/md5"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"hash"
+	"log"
+	"math/rand"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+)
+
+var AddressKey map[string]string
+var AddressPoolv6 []string
+var AddressPoolv4 []string
+var MyPWD string
+var v6only bool
+var md5Ctx hash.Hash
+
+func main() {
+	md5Ctx = md5.New()
+	v6only = false
+	AddressKey = make(map[string]string)
+	//init Address Pool
+	MyPWD = "password"
+	AddMyAddress("dddd:1234:5678::2", MyPWD)
+	AddMyAddress("dddd:1234:5678::3", MyPWD)
+	AddMyAddress("dddd:1234:5678::4", MyPWD)
+	AddMyAddress("dddd:1234:5678::5", MyPWD)
+	AddMyAddress("192.168.168.2", MyPWD)
+	AddMyAddress("192.168.168.3", MyPWD)
+	AddMyAddress("192.168.168.4", MyPWD)
+	AddMyAddress("192.168.168.5", MyPWD)
+	handle := IfSelect()
+
+	if v6only {
+		filterv6(handle)
+	}
+
+	go recv(handle)
+	dst := GetInput("dstip")
+	if dst == "" {
+		handle.Close()
+		return
+	}
+	for {
+		TXdata := make(map[string]string)
+		TXdata["SRCIP"] = ""
+		if !v6only {
+			for _, IPv4 := range AddressPoolv4 {
+				TXdata["SRCIP"] += IPv4 + ","
+			}
+		}
+		for _, IPv6 := range AddressPoolv6 {
+			TXdata["SRCIP"] += IPv6 + ","
+		}
+		TXdata["DSTIP"] = dst
+		dstlist := strings.Split(TXdata["DSTIP"], ",")
+		PreSlicedData := GetInput("data")
+		if PreSlicedData == "" {
+			break
+		}
+		piece := 0
+		SendJson, err := json.Marshal(TXdata)
+		if err != nil {
+			log.Fatal(err)
+		}
+		TXHandle(handle, dstlist[RandInt(0, len(dstlist)-1)], SendJson)
+	}
+	defer handle.Close()
+}
+
+func TXHandle(handle *pcap.Handle, dst string, data []byte) {
+	var outgoingPacket []byte
+	if IsIPv6Addr(dst) {
+		if len(AddressPoolv6) < 1 {
+			log.Println("No V6 addr to use,ignore.")
+			return
+		}
+		srcAddr := AddressPoolv6[RandInt(0, len(AddressPoolv6)-1)]
+		outgoingPacket = MakePacketv6(data, srcAddr, dst)
+	} else {
+		if len(AddressPoolv4) < 1 {
+			log.Println("No V4 addr to use,ignore.")
+			return
+		}
+		srcAddr := AddressPoolv4[RandInt(0, len(AddressPoolv4)-1)]
+		outgoingPacket = MakePacketv4(data, srcAddr, dst)
+	}
+	err := handle.WritePacketData(outgoingPacket)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+}
+
+func recv(handle *pcap.Handle) {
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	RXdata := make(map[string]string)
+	for packet := range packetSource.Packets() {
+		ipv6Layer := packet.Layer(layers.LayerTypeIPv6)
+		if ipv6Layer != nil {
+			ipv6, _ := ipv6Layer.(*layers.IPv6)
+			_, ok := AddressKey[ipv6.DstIP.String()]
+			if !ok {
+				//Not Mine
+			} else {
+				err := json.Unmarshal(ipv6Layer.LayerPayload()[8:], &RXdata)
+				if err != nil {
+					continue
+				}
+				log.Printf("From %s to %s\n", ipv6.SrcIP, ipv6.DstIP)
+				log.Println(RXdata)
+			}
+		}
+		ipv4Layer := packet.Layer(layers.LayerTypeIPv4)
+		if ipv4Layer != nil {
+			ipv4, _ := ipv4Layer.(*layers.IPv4)
+			_, ok := AddressKey[ipv4.DstIP.String()]
+			if !ok {
+				//Not Mine
+			} else {
+				err := json.Unmarshal(ipv4Layer.LayerPayload()[8:], &RXdata)
+				if err != nil {
+					continue
+				}
+				log.Printf("From %s to %s\n", ipv4.SrcIP, ipv4.DstIP)
+				log.Println(RXdata)
+			}
+		}
+	}
+}
+func MakePacketv4(data []byte, SrcIPv4 string, DstIPv4 string) []byte {
+	var options gopacket.SerializeOptions
+	SrcPort := RandInt(1, 65535)
+	DstPort := RandInt(1, 65535)
+	buffer := gopacket.NewSerializeBuffer()
+	//IPv4 Layer
+	ipv4Layer := &layers.IPv4{}
+	ipv4Layer.SrcIP = net.ParseIP(SrcIPv4)
+	ipv4Layer.DstIP = net.ParseIP(DstIPv4)
+	ipv4Layer.Version = uint8(4)
+	ipv4Layer.TTL = uint8(64)
+	ipv4Layer.Checksum = uint16(0)
+	//ipv4Layer. = uint16(len(data) + 8)
+	ipv4Layer.Protocol = layers.IPProtocolUDP
+	ipv4Layer.IHL = uint8(5)
+	ipv4Layer.Length = uint16(len(data) + 28)
+	v4buffer := gopacket.NewSerializeBuffer()
+	ipv4Layer.SerializeTo(v4buffer, options)
+	v4package := v4buffer.Bytes()
+	ipv4Layer.Checksum = checkSum(v4package[:20])
+	//EtherNet Layer
+	EtherLayer := &layers.Ethernet{}
+	EtherLayer.SrcMAC = net.HardwareAddr{0x00, 0xAA, 0xFA, 0xAA, 0xFF, 0xAA}
+	EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
+	EtherLayer.EthernetType = layers.EthernetTypeIPv4
+	//UDP Layer
+	UDPLayer := &layers.UDP{}
+	UDPLayer.SrcPort = layers.UDPPort(SrcPort)
+	UDPLayer.DstPort = layers.UDPPort(DstPort)
+	UDPLayer.Length = uint16(len(data))
+	FakeHeader := makeUDPFakeHeader(SrcIPv4, DstIPv4, ipv4Layer.Length, SrcPort, DstPort, UDPLayer.Length)
+	FakeHeaderbyte, err := hex.DecodeString(FakeHeader)
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPLayer.Checksum = checkSum(FakeHeaderbyte)
+	gopacket.SerializeLayers(buffer, options, EtherLayer, ipv4Layer, UDPLayer, gopacket.Payload(data))
+	outgoingPacket := buffer.Bytes()
+	return outgoingPacket
+}
+
+func MakePacketv6(data []byte, SrcIPv6 string, DstIPv6 string) []byte {
+	var options gopacket.SerializeOptions
+	SrcPort := RandInt(1, 65535)
+	DstPort := RandInt(1, 65535)
+	buffer := gopacket.NewSerializeBuffer()
+	//IPv6 Layer
+	ipv6Layer := &layers.IPv6{}
+	ipv6Layer.SrcIP = net.ParseIP(SrcIPv6)
+	ipv6Layer.DstIP = net.ParseIP(DstIPv6)
+	ipv6Layer.Version = uint8(6)
+	ipv6Layer.HopLimit = uint8(64)
+	ipv6Layer.Length = uint16(len(data) + 8)
+	ipv6Layer.NextHeader = layers.IPProtocolUDP
+	//EtherNet Layer
+	EtherLayer := &layers.Ethernet{}
+	EtherLayer.SrcMAC = net.HardwareAddr{0x00, 0xAA, 0xFA, 0xAA, 0xFF, 0xAA}
+	EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
+	EtherLayer.EthernetType = layers.EthernetTypeIPv6
+	//UDP Layer
+	UDPLayer := &layers.UDP{}
+	UDPLayer.SrcPort = layers.UDPPort(SrcPort)
+	UDPLayer.DstPort = layers.UDPPort(DstPort)
+	UDPLayer.Length = uint16(len(data))
+	FakeHeader := makeUDPFakeHeader(SrcIPv6, DstIPv6, ipv6Layer.Length, SrcPort, DstPort, UDPLayer.Length)
+	FakeHeaderbyte, err := hex.DecodeString(FakeHeader)
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPLayer.Checksum = checkSum(FakeHeaderbyte)
+	gopacket.SerializeLayers(buffer, options, EtherLayer, ipv6Layer, UDPLayer, gopacket.Payload(data))
+	outgoingPacket := buffer.Bytes()
+	return outgoingPacket
+}
+
+func RandInt(min, max int) int {
+	rand.Seed(time.Now().UnixNano() * rand.Int63n(100))
+	return min + rand.Intn(max-min+1)
+}
+
+func makeUDPFakeHeader(SrcIP string, DstIP string, iplen uint16, SrcPort int, DstPort int, udplen uint16) string {
+	UDPFakeHeader := ""
+	FakeUDPSrc, err := net.ParseIP(SrcIP).MarshalText()
+	if err != nil {
+		log.Fatal(err)
+	}
+	FakeUDPDst, err := net.ParseIP(DstIP).MarshalText()
+	if err != nil {
+		log.Fatal(err)
+	}
+	var convbuffer bytes.Buffer
+	err = binary.Write(&convbuffer, binary.BigEndian, uint8(0))
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPFakeHeader += hex.EncodeToString(FakeUDPSrc)
+	UDPFakeHeader += hex.EncodeToString(FakeUDPDst)
+	UDPFakeHeader += hex.EncodeToString(convbuffer.Bytes())
+	convbuffer.Reset()
+	err = binary.Write(&convbuffer, binary.LittleEndian, uint8(17))
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPFakeHeader += hex.EncodeToString(convbuffer.Bytes())
+	convbuffer.Reset()
+	err = binary.Write(&convbuffer, binary.LittleEndian, iplen)
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPFakeHeader += hex.EncodeToString(convbuffer.Bytes())
+	convbuffer.Reset()
+	err = binary.Write(&convbuffer, binary.LittleEndian, uint16(SrcPort))
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPFakeHeader += hex.EncodeToString(convbuffer.Bytes())
+	convbuffer.Reset()
+	err = binary.Write(&convbuffer, binary.LittleEndian, uint16(DstPort))
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPFakeHeader += hex.EncodeToString(convbuffer.Bytes())
+	convbuffer.Reset()
+	err = binary.Write(&convbuffer, binary.LittleEndian, udplen)
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPFakeHeader += hex.EncodeToString(convbuffer.Bytes())
+	convbuffer.Reset()
+	err = binary.Write(&convbuffer, binary.LittleEndian, uint16(0))
+	if err != nil {
+		log.Fatal(err)
+	}
+	UDPFakeHeader += hex.EncodeToString(convbuffer.Bytes())
+	convbuffer.Reset()
+	return UDPFakeHeader
+}
+
+func checkSum(msg []byte) uint16 {
+	sum := 0
+	for n := 1; n < len(msg)-1; n += 2 {
+		sum += int(msg[n])*256 + int(msg[n+1])
+	}
+	sum = (sum >> 16) + (sum & 0xffff)
+	sum += (sum >> 16)
+	var ans = uint16(^sum)
+	return ans
+}
+
+func AddMyAddress(addr string, key string) {
+	if IsIPv6Addr(addr) {
+		AddressPoolv6 = append(AddressPoolv6, addr)
+		AddressKey[addr] = key
+	} else {
+		AddressPoolv4 = append(AddressPoolv4, addr)
+		AddressKey[addr] = key
+	}
+}
+
+func IsIPv6Addr(address string) bool {
+	return strings.Count(address, ":") >= 2
+}
+
+func IfSelect() *pcap.Handle {
+	// Find all devices
+	devices, err := pcap.FindAllDevs()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ifmap := make(map[string]string)
+	devmap := make(map[string]pcap.Interface)
+	num := 1
+	log.Println("Interface Found:")
+	for _, device := range devices {
+		log.Println(strconv.Itoa(num) + "-" + device.Description)
+		ifmap[strconv.Itoa(num)] = device.Name
+		devmap[device.Name] = device
+		num += 1
+	}
+	//Select Listen Interface
+	var selectediface string
+	for {
+		log.Println("Please Select Interface Number:")
+		inputReader := bufio.NewReader(os.Stdin)
+		input, err := inputReader.ReadString('\n')
+		input = strings.Trim(input, "\n")
+		input = strings.Trim(input, "\r")
+		if err != nil {
+			log.Fatal(err)
+		}
+		ifname, ok := ifmap[input]
+		if !ok {
+			continue
+		} else {
+			selectediface = ifname
+			break
+		}
+	}
+
+	//Add Listen Addr
+	ifaceaddr := devmap[selectediface].Addresses
+	for addr := range ifaceaddr {
+		thisaddr := ifaceaddr[addr].IP.String()
+		if !IsIPv6Addr(thisaddr) && v6only {
+			continue
+		}
+		AddMyAddress(thisaddr, MyPWD)
+		log.Println("Listen on :" + thisaddr)
+	}
+
+	handle, err := pcap.OpenLive(selectediface, 40960, true, time.Millisecond)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return handle
+}
+
+func filterv6(handle *pcap.Handle) {
+	err := handle.SetBPFFilter("ip6")
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func GetInput(tip string) string {
+	for {
+		log.Println("Please input " + tip + ":")
+		inputReader := bufio.NewReader(os.Stdin)
+		input, err := inputReader.ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+		}
+		input = strings.Trim(input, "\n")
+		input = strings.Trim(input, "\r")
+		if input == "" {
+			break
+		}
+		return input
+	}
+	return ""
+}
