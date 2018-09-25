@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/cipher"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +21,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	aead "golang.org/x/crypto/chacha20poly1305"
 )
 
 var AddressKey map[string]string
@@ -69,6 +72,10 @@ func main() {
 		handle.Close()
 		return
 	}
+	ciper, err := gerateAEAD(dstkey)
+	if err != nil {
+		log.Fatal(err)
+	}
 	for {
 		SrcIP := ""
 		if !v6only {
@@ -80,7 +87,7 @@ func main() {
 			SrcIP += IPv6 + ","
 		}
 
-		PreSlicedData := []byte(GetInput("data"))
+		PreSlicedData := ciper.Seal(nil, geratenonce(), []byte(GetInput("data")), nil)
 		if len(PreSlicedData) == 0 {
 			break
 		}
@@ -195,6 +202,10 @@ func ProcessRXData(RXdata map[string]string) {
 		//ignore unexpect packet
 		return
 	}
+	ciper, err := gerateAEAD(MyPWD)
+	if err != nil {
+		return
+	}
 	DataBuffer, ok := PacketBuffer[RXdata["MD5Sum"]]
 	if !ok {
 		PacketTimestamp[RXdata["MD5Sum"]] = RXdata["Timestamp"]
@@ -222,6 +233,10 @@ func ProcessRXData(RXdata map[string]string) {
 			if err != nil {
 				return
 			}
+			ByteData, err = ciper.Open(nil, geratenonce(), ByteData, nil)
+			if err != nil {
+				return
+			}
 			log.Println("Msg-From:" + RXdata["SrcIP"])
 			log.Println(string(ByteData))
 			delete(PacketBuffer, RXdata["MD5Sum"])
@@ -241,6 +256,10 @@ func ProcessRXData(RXdata map[string]string) {
 				DataStr += PacketBuffer[RXdata["MD5Sum"]][i]
 			}
 			ByteData, err := hex.DecodeString(DataStr)
+			if err != nil {
+				return
+			}
+			ByteData, err = ciper.Open(nil, geratenonce(), ByteData, nil)
 			if err != nil {
 				return
 			}
@@ -516,4 +535,16 @@ func GetInput(tip string) string {
 		return input
 	}
 	return ""
+}
+
+func gerateAEAD(password string) (AEAD cipher.AEAD, err error) {
+	hash := sha256.New()
+	hash.Write([]byte(password))
+	return aead.New(hash.Sum(nil))
+}
+
+func geratenonce() []byte {
+	hash := sha256.New()
+	hash.Write([]byte(strconv.Itoa(int(time.Now().Unix()/300) * 300)))
+	return hash.Sum(nil)[:12]
 }
