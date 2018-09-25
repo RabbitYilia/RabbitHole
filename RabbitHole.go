@@ -27,6 +27,8 @@ import (
 var AddressKey map[string]string
 var AddressPoolv6 []string
 var AddressPoolv4 []string
+var PeerPoolv4 []string
+var PeerPoolv6 []string
 var NetworkPWD string
 var MyPWD string
 var v6only bool
@@ -55,6 +57,10 @@ func main() {
 	AddMyAddress("192.168.168.3", NetworkPWD)
 	AddMyAddress("192.168.168.4", NetworkPWD)
 	AddMyAddress("192.168.168.5", NetworkPWD)
+	AddPeerAddress("dddd:1234:5678::3", NetworkPWD)
+	AddPeerAddress("dddd:1234:5678::4", NetworkPWD)
+	AddPeerAddress("192.168.168.3", NetworkPWD)
+	AddPeerAddress("192.168.168.4", NetworkPWD)
 	handle := IfSelect()
 
 	if v6only {
@@ -62,6 +68,28 @@ func main() {
 	}
 	go CleanBuffer()
 	go recv(handle)
+	TX(handle)
+	defer handle.Close()
+}
+func CleanBuffer() {
+	for {
+		TimeOutTime := time.Now().UnixNano() + 10*time.Second.Nanoseconds()
+		for MD5Sum, TimestampStr := range PacketTimestamp {
+			Timestamp, err := strconv.ParseInt(TimestampStr, 10, 64)
+			if err != nil {
+				log.Fatal(err)
+				delete(PacketTimestamp, MD5Sum)
+				delete(PacketCount, MD5Sum)
+			}
+			if Timestamp < TimeOutTime {
+				delete(PacketTimestamp, MD5Sum)
+				delete(PacketCount, MD5Sum)
+			}
+		}
+		time.Sleep(10 * time.Second)
+	}
+}
+func TX(handle *pcap.Handle) {
 	dst := GetInput("dstip")
 	if dst == "" {
 		handle.Close()
@@ -105,27 +133,31 @@ func main() {
 			TXdata["PiecedMsg"] = PiecedMsg
 			TXdata["DstIP"] = dst
 			TXdata["TTL"] = strconv.Itoa(RandInt(1, 10))
-			TXHandleDirectly(handle, TXdata["DstIP"], TXdata)
+			TXHandle(handle, TXdata["DstIP"], TXdata)
 		}
 	}
-	defer handle.Close()
 }
-func CleanBuffer() {
-	for {
-		TimeOutTime := time.Now().UnixNano() + 10*time.Second.Nanoseconds()
-		for MD5Sum, TimestampStr := range PacketTimestamp {
-			Timestamp, err := strconv.ParseInt(TimestampStr, 10, 64)
-			if err != nil {
-				log.Fatal(err)
-				delete(PacketTimestamp, MD5Sum)
-				delete(PacketCount, MD5Sum)
-			}
-			if Timestamp < TimeOutTime {
-				delete(PacketTimestamp, MD5Sum)
-				delete(PacketCount, MD5Sum)
+func TXHandle(handle *pcap.Handle, dstliststr string, TXdata map[string]string) {
+	TTL, err := strconv.Atoi(TXdata["TTL"])
+	if err != nil {
+		log.Fatal(err)
+	}
+	if TTL < 2 {
+		TXHandleDirectly(handle, TXdata["DstIP"], TXdata)
+	} else {
+		DST := ""
+		if strings.Contains(dstliststr, ".") {
+			for _, IPv4 := range PeerPoolv4 {
+				DST += IPv4 + ","
 			}
 		}
-		time.Sleep(10 * time.Second)
+		if strings.Contains(dstliststr, ":") {
+			for _, IPv6 := range PeerPoolv6 {
+				DST += IPv6 + ","
+			}
+		}
+		DST = strings.Trim(DST, ",")
+		HandleToPeer(handle, DST, TXdata)
 	}
 }
 func TXHandleDirectly(handle *pcap.Handle, dstliststr string, TXdata map[string]string) {
@@ -140,30 +172,82 @@ func TXHandleDirectly(handle *pcap.Handle, dstliststr string, TXdata map[string]
 	}
 	SendJson = ciper.Seal(nil, geratenonce(), SendJson, nil)
 	dstlist := strings.Split(dstliststr, ",")
-	dst := dstlist[RandInt(0, len(dstlist)-1)]
 	var outgoingPacket []byte
-	if IsIPv6Addr(dst) {
-		if len(AddressPoolv6) < 1 {
-			log.Println("No V6 addr to use,ignore.")
-			return
+	for {
+		if len(AddressPoolv6) < 1 && len(AddressPoolv4) < 1 {
+			log.Println("Unable to Send")
+			break
 		}
-		srcAddr := AddressPoolv6[RandInt(0, len(AddressPoolv6)-1)]
-		outgoingPacket = MakePacketv6(SendJson, srcAddr, dst)
-	} else {
-		if len(AddressPoolv4) < 1 {
-			log.Println("No V4 addr to use,ignore.")
-			return
+		dst := dstlist[RandInt(0, len(dstlist)-1)]
+		if IsIPv6Addr(dst) {
+			if len(AddressPoolv6) < 1 {
+				log.Println("No V6 addr to use,ignore.")
+			} else {
+				srcAddr := AddressPoolv6[RandInt(0, len(AddressPoolv6)-1)]
+				outgoingPacket = MakePacketv6(SendJson, srcAddr, dst)
+				break
+			}
+		} else {
+			if len(AddressPoolv4) < 1 {
+				log.Println("No V4 addr to use,ignore.")
+			} else {
+				srcAddr := AddressPoolv4[RandInt(0, len(AddressPoolv4)-1)]
+				outgoingPacket = MakePacketv4(SendJson, srcAddr, dst)
+				break
+			}
 		}
-		srcAddr := AddressPoolv4[RandInt(0, len(AddressPoolv4)-1)]
-		outgoingPacket = MakePacketv4(SendJson, srcAddr, dst)
 	}
 	err = handle.WritePacketData(outgoingPacket)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 }
-
+func HandleToPeer(handle *pcap.Handle, dstliststr string, TXdata map[string]string) {
+	ciper, err := gerateAEAD(NetworkPWD)
+	if err != nil {
+		log.Fatal(err)
+	}
+	TTL, err := strconv.Atoi(TXdata["TTL"])
+	if err != nil {
+		log.Fatal(err)
+	}
+	TXdata["TTL"] = strconv.Itoa(TTL - 1)
+	SendJson, err := json.Marshal(TXdata)
+	if err != nil {
+		log.Fatal(err)
+	}
+	SendJson = ciper.Seal(nil, geratenonce(), SendJson, nil)
+	dstlist := strings.Split(dstliststr, ",")
+	var outgoingPacket []byte
+	for {
+		if len(AddressPoolv6) < 1 && len(AddressPoolv4) < 1 {
+			log.Println("Unable to Send")
+			break
+		}
+		dst := dstlist[RandInt(0, len(dstlist)-1)]
+		if IsIPv6Addr(dst) {
+			if len(AddressPoolv6) < 1 {
+				log.Println("No V6 addr to use,ignore.")
+			} else {
+				srcAddr := AddressPoolv6[RandInt(0, len(AddressPoolv6)-1)]
+				outgoingPacket = MakePacketv6(SendJson, srcAddr, dst)
+				break
+			}
+		} else {
+			if len(AddressPoolv4) < 1 {
+				log.Println("No V4 addr to use,ignore.")
+			} else {
+				srcAddr := AddressPoolv4[RandInt(0, len(AddressPoolv4)-1)]
+				outgoingPacket = MakePacketv4(SendJson, srcAddr, dst)
+				break
+			}
+		}
+	}
+	err = handle.WritePacketData(outgoingPacket)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
 func recv(handle *pcap.Handle) {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	RXdata := make(map[string]string)
@@ -204,7 +288,11 @@ func recv(handle *pcap.Handle) {
 			continue
 		}
 		if RXdata["TTL"] == "1" {
+			log.Println("My Packet,Process")
 			ProcessRXData(RXdata)
+		} else {
+			log.Println("Peer Packet,Forward")
+			TXHandle(handle, RXdata["DstIP"], RXdata)
 		}
 	}
 }
@@ -461,6 +549,16 @@ func AddMyAddress(addr string, key string) {
 		AddressKey[addr] = key
 	} else {
 		AddressPoolv4 = append(AddressPoolv4, addr)
+		AddressKey[addr] = key
+	}
+}
+
+func AddPeerAddress(addr string, key string) {
+	if IsIPv6Addr(addr) {
+		PeerPoolv6 = append(PeerPoolv6, addr)
+		AddressKey[addr] = key
+	} else {
+		PeerPoolv4 = append(PeerPoolv4, addr)
 		AddressKey[addr] = key
 	}
 }
