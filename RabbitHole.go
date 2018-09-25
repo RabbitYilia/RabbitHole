@@ -129,11 +129,16 @@ func CleanBuffer() {
 	}
 }
 func TXHandleDirectly(handle *pcap.Handle, dstliststr string, TXdata map[string]string) {
+	ciper, err := gerateAEAD(NetworkPWD)
+	if err != nil {
+		log.Fatal(err)
+	}
 	TXdata["TTL"] = "1"
 	SendJson, err := json.Marshal(TXdata)
 	if err != nil {
 		log.Fatal(err)
 	}
+	SendJson = ciper.Seal(nil, geratenonce(), SendJson, nil)
 	dstlist := strings.Split(dstliststr, ",")
 	dst := dstlist[RandInt(0, len(dstlist)-1)]
 	var outgoingPacket []byte
@@ -162,6 +167,11 @@ func TXHandleDirectly(handle *pcap.Handle, dstliststr string, TXdata map[string]
 func recv(handle *pcap.Handle) {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	RXdata := make(map[string]string)
+	var Payload []byte
+	ciper, err := gerateAEAD(NetworkPWD)
+	if err != nil {
+		log.Fatal(err)
+	}
 	for packet := range packetSource.Packets() {
 		ipv6Layer := packet.Layer(layers.LayerTypeIPv6)
 		if ipv6Layer != nil {
@@ -170,10 +180,7 @@ func recv(handle *pcap.Handle) {
 			if !ok {
 				//Not Mine
 			} else {
-				err := json.Unmarshal(ipv6Layer.LayerPayload()[8:], &RXdata)
-				if err != nil {
-					continue
-				}
+				Payload = ipv6Layer.LayerPayload()[8:]
 				log.Printf("From %s to %s\n", ipv6.SrcIP, ipv6.DstIP)
 			}
 		}
@@ -184,12 +191,17 @@ func recv(handle *pcap.Handle) {
 			if !ok {
 				//Not Mine
 			} else {
-				err := json.Unmarshal(ipv4Layer.LayerPayload()[8:], &RXdata)
-				if err != nil {
-					continue
-				}
+				Payload = ipv4Layer.LayerPayload()[8:]
 				log.Printf("From %s to %s\n", ipv4.SrcIP, ipv4.DstIP)
 			}
+		}
+		Payload, err = ciper.Open(nil, geratenonce(), Payload, nil)
+		if err != nil {
+			return
+		}
+		err := json.Unmarshal(Payload, &RXdata)
+		if err != nil {
+			continue
 		}
 		if RXdata["TTL"] == "1" {
 			ProcessRXData(RXdata)
