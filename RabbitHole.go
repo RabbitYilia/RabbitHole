@@ -176,7 +176,7 @@ func TXHandleDirectly(handle *pcap.Handle, dstliststr string, TXdata map[string]
 	for {
 		if len(AddressPoolv6) < 1 && len(AddressPoolv4) < 1 {
 			log.Println("Unable to Send")
-			break
+			return
 		}
 		dst := dstlist[RandInt(0, len(dstlist)-1)]
 		if IsIPv6Addr(dst) {
