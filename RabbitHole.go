@@ -86,7 +86,7 @@ func main() {
 		for _, IPv6 := range AddressPoolv6 {
 			SrcIP += IPv6 + ","
 		}
-
+		SrcIP = strings.Trim(SrcIP, ",")
 		PreSlicedData := ciper.Seal(nil, geratenonce(), []byte(GetInput("data")), nil)
 		if len(PreSlicedData) == 0 {
 			break
@@ -197,7 +197,7 @@ func recv(handle *pcap.Handle) {
 		}
 		Payload, err = ciper.Open(nil, geratenonce(), Payload, nil)
 		if err != nil {
-			return
+			continue
 		}
 		err := json.Unmarshal(Payload, &RXdata)
 		if err != nil {
