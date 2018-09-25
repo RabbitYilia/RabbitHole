@@ -91,6 +91,7 @@ func main() {
 		for ThisPiece, PiecedMsg := range SlicedData {
 			TXdata := make(map[string]string)
 			TXdata["TotalPiece"] = TotalPiece
+			TXdata["SrcIP"] = SrcIP
 			TXdata["ThisPiece"] = ThisPiece
 			TXdata["Timestamp"] = Timestamp
 			TXdata["MD5Sum"] = MD5Sum
@@ -221,6 +222,7 @@ func ProcessRXData(RXdata map[string]string) {
 			if err != nil {
 				return
 			}
+			log.Println("Msg-From:" + RXdata["SrcIP"])
 			log.Println(string(ByteData))
 			delete(PacketBuffer, RXdata["MD5Sum"])
 			PacketCount[RXdata["MD5Sum"]] = -1
@@ -242,6 +244,7 @@ func ProcessRXData(RXdata map[string]string) {
 			if err != nil {
 				return
 			}
+			log.Println("Msg-From:" + RXdata["SrcIP"])
 			log.Println(string(ByteData))
 			delete(PacketBuffer, RXdata["MD5Sum"])
 			PacketCount[RXdata["MD5Sum"]] = -1
