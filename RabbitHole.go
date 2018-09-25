@@ -24,24 +24,34 @@ import (
 var AddressKey map[string]string
 var AddressPoolv6 []string
 var AddressPoolv4 []string
+var NetworkPWD string
 var MyPWD string
 var v6only bool
 var md5Ctx hash.Hash
+var PacketBuffer map[string][]string
+var PacketTimestamp map[string]string
+var PacketCount map[string]int
+var PacketTotal map[string]int
 
 func main() {
+	PacketBuffer = make(map[string][]string)
+	PacketTimestamp = make(map[string]string)
+	PacketCount = make(map[string]int)
+	PacketTotal = make(map[string]int)
 	md5Ctx = md5.New()
 	v6only = false
 	AddressKey = make(map[string]string)
 	//init Address Pool
+	NetworkPWD = "password"
 	MyPWD = "password"
-	AddMyAddress("dddd:1234:5678::2", MyPWD)
-	AddMyAddress("dddd:1234:5678::3", MyPWD)
-	AddMyAddress("dddd:1234:5678::4", MyPWD)
-	AddMyAddress("dddd:1234:5678::5", MyPWD)
-	AddMyAddress("192.168.168.2", MyPWD)
-	AddMyAddress("192.168.168.3", MyPWD)
-	AddMyAddress("192.168.168.4", MyPWD)
-	AddMyAddress("192.168.168.5", MyPWD)
+	AddMyAddress("dddd:1234:5678::2", NetworkPWD)
+	AddMyAddress("dddd:1234:5678::3", NetworkPWD)
+	AddMyAddress("dddd:1234:5678::4", NetworkPWD)
+	AddMyAddress("dddd:1234:5678::5", NetworkPWD)
+	AddMyAddress("192.168.168.2", NetworkPWD)
+	AddMyAddress("192.168.168.3", NetworkPWD)
+	AddMyAddress("192.168.168.4", NetworkPWD)
+	AddMyAddress("192.168.168.5", NetworkPWD)
 	handle := IfSelect()
 
 	if v6only {
@@ -54,34 +64,53 @@ func main() {
 		handle.Close()
 		return
 	}
+	dstkey := GetInput("dstkey")
+	if dstkey == "" {
+		handle.Close()
+		return
+	}
 	for {
-		TXdata := make(map[string]string)
-		TXdata["SRCIP"] = ""
+		SrcIP := ""
 		if !v6only {
 			for _, IPv4 := range AddressPoolv4 {
-				TXdata["SRCIP"] += IPv4 + ","
+				SrcIP += IPv4 + ","
 			}
 		}
 		for _, IPv6 := range AddressPoolv6 {
-			TXdata["SRCIP"] += IPv6 + ","
+			SrcIP += IPv6 + ","
 		}
-		TXdata["DSTIP"] = dst
-		dstlist := strings.Split(TXdata["DSTIP"], ",")
-		PreSlicedData := GetInput("data")
-		if PreSlicedData == "" {
+
+		PreSlicedData := []byte(GetInput("data"))
+		if len(PreSlicedData) == 0 {
 			break
 		}
-		piece := 0
-		SendJson, err := json.Marshal(TXdata)
-		if err != nil {
-			log.Fatal(err)
+		Timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+		MD5Sum := GetMD5Str(PreSlicedData)
+		TotalPieceInt, SlicedData := SliceData(PreSlicedData)
+		TotalPiece := strconv.Itoa(TotalPieceInt)
+		for ThisPiece, PiecedMsg := range SlicedData {
+			TXdata := make(map[string]string)
+			TXdata["TotalPiece"] = TotalPiece
+			TXdata["ThisPiece"] = ThisPiece
+			TXdata["Timestamp"] = Timestamp
+			TXdata["MD5Sum"] = MD5Sum
+			TXdata["PiecedMsg"] = PiecedMsg
+			TXdata["DstIP"] = dst
+			TXdata["TTL"] = strconv.Itoa(RandInt(1, 10))
+			TXHandleDirectly(handle, TXdata["DstIP"], TXdata)
 		}
-		TXHandle(handle, dstlist[RandInt(0, len(dstlist)-1)], SendJson)
 	}
 	defer handle.Close()
 }
 
-func TXHandle(handle *pcap.Handle, dst string, data []byte) {
+func TXHandleDirectly(handle *pcap.Handle, dstliststr string, TXdata map[string]string) {
+	TXdata["TTL"] = "1"
+	SendJson, err := json.Marshal(TXdata)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dstlist := strings.Split(dstliststr, ",")
+	dst := dstlist[RandInt(0, len(dstlist)-1)]
 	var outgoingPacket []byte
 	if IsIPv6Addr(dst) {
 		if len(AddressPoolv6) < 1 {
@@ -89,16 +118,16 @@ func TXHandle(handle *pcap.Handle, dst string, data []byte) {
 			return
 		}
 		srcAddr := AddressPoolv6[RandInt(0, len(AddressPoolv6)-1)]
-		outgoingPacket = MakePacketv6(data, srcAddr, dst)
+		outgoingPacket = MakePacketv6(SendJson, srcAddr, dst)
 	} else {
 		if len(AddressPoolv4) < 1 {
 			log.Println("No V4 addr to use,ignore.")
 			return
 		}
 		srcAddr := AddressPoolv4[RandInt(0, len(AddressPoolv4)-1)]
-		outgoingPacket = MakePacketv4(data, srcAddr, dst)
+		outgoingPacket = MakePacketv4(SendJson, srcAddr, dst)
 	}
-	err := handle.WritePacketData(outgoingPacket)
+	err = handle.WritePacketData(outgoingPacket)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -121,7 +150,6 @@ func recv(handle *pcap.Handle) {
 					continue
 				}
 				log.Printf("From %s to %s\n", ipv6.SrcIP, ipv6.DstIP)
-				log.Println(RXdata)
 			}
 		}
 		ipv4Layer := packet.Layer(layers.LayerTypeIPv4)
@@ -136,11 +164,94 @@ func recv(handle *pcap.Handle) {
 					continue
 				}
 				log.Printf("From %s to %s\n", ipv4.SrcIP, ipv4.DstIP)
-				log.Println(RXdata)
 			}
+		}
+		if RXdata["TTL"] == "1" {
+			ProcessRXData(RXdata)
 		}
 	}
 }
+func ProcessRXData(RXdata map[string]string) {
+	DataBuffer, ok := PacketBuffer[RXdata["MD5Sum"]]
+	if !ok {
+		PacketTimestamp[RXdata["MD5Sum"]] = RXdata["Timestamp"]
+		thistotal, err := strconv.Atoi(RXdata["TotalPiece"])
+		if err != nil {
+			return
+		}
+		packetint, err := strconv.Atoi(RXdata["ThisPiece"])
+		if err != nil {
+			return
+		}
+
+		var thisbuffer []string
+		thisbuffer = make([]string, thistotal+1)
+		PacketBuffer[RXdata["MD5Sum"]] = thisbuffer
+		PacketCount[RXdata["MD5Sum"]] = 1
+		PacketTotal[RXdata["MD5Sum"]] = thistotal
+		PacketBuffer[RXdata["MD5Sum"]][packetint] = RXdata["PiecedMsg"]
+		if PacketCount[RXdata["MD5Sum"]] == PacketTotal[RXdata["MD5Sum"]] {
+			DataStr := ""
+			for i := 1; i <= PacketTotal[RXdata["MD5Sum"]]; i++ {
+				DataStr += PacketBuffer[RXdata["MD5Sum"]][i]
+			}
+			ByteData, err := hex.DecodeString(DataStr)
+			if err != nil {
+				return
+			}
+			log.Println(string(ByteData))
+			delete(PacketBuffer, RXdata["MD5Sum"])
+			delete(PacketTimestamp, RXdata["MD5Sum"])
+			delete(PacketCount, RXdata["MD5Sum"])
+			delete(PacketTotal, RXdata["MD5Sum"])
+		}
+	} else {
+		PacketInt, err := strconv.Atoi(RXdata["ThisPiece"])
+		if err != nil {
+			return
+		}
+		DataBuffer[PacketInt] = RXdata["PiecedMsg"]
+		PacketCount[RXdata["MD5Sum"]] += 1
+		if PacketCount[RXdata["MD5Sum"]] == PacketTotal[RXdata["MD5Sum"]] {
+			DataStr := ""
+			for i := 1; i <= PacketTotal[RXdata["MD5Sum"]]; i++ {
+				DataStr += PacketBuffer[RXdata["MD5Sum"]][i]
+			}
+			ByteData, err := hex.DecodeString(DataStr)
+			if err != nil {
+				return
+			}
+			log.Println(string(ByteData))
+			delete(PacketBuffer, RXdata["MD5Sum"])
+			delete(PacketTimestamp, RXdata["MD5Sum"])
+			delete(PacketCount, RXdata["MD5Sum"])
+			delete(PacketTotal, RXdata["MD5Sum"])
+		}
+	}
+}
+func GetMD5Str(data []byte) string {
+	md5Ctx.Reset()
+	md5Ctx.Write(data)
+	return hex.EncodeToString(md5Ctx.Sum(nil))
+}
+
+func SliceData(data []byte) (int, map[string]string) {
+	TotalPiece := 0
+	DataStr := hex.EncodeToString(data)
+	SplitedMsgs := make(map[string]string)
+	for {
+		TotalPiece += 1
+		if len(DataStr) < 10 {
+			SplitedMsgs[strconv.Itoa(TotalPiece)] = DataStr
+			break
+		}
+		ThisLen := RandInt(1, len(DataStr))
+		SplitedMsgs[strconv.Itoa(TotalPiece)] = DataStr[:ThisLen]
+		DataStr = DataStr[ThisLen:]
+	}
+	return TotalPiece, SplitedMsgs
+}
+
 func MakePacketv4(data []byte, SrcIPv4 string, DstIPv4 string) []byte {
 	var options gopacket.SerializeOptions
 	SrcPort := RandInt(1, 65535)
@@ -348,7 +459,7 @@ func IfSelect() *pcap.Handle {
 		if !IsIPv6Addr(thisaddr) && v6only {
 			continue
 		}
-		AddMyAddress(thisaddr, MyPWD)
+		AddMyAddress(thisaddr, NetworkPWD)
 		log.Println("Listen on :" + thisaddr)
 	}
 
