@@ -57,7 +57,7 @@ func main() {
 	if v6only {
 		filterv6(handle)
 	}
-
+	go CleanBuffer()
 	go recv(handle)
 	dst := GetInput("dstip")
 	if dst == "" {
@@ -102,7 +102,24 @@ func main() {
 	}
 	defer handle.Close()
 }
-
+func CleanBuffer() {
+	for {
+		TimeOutTime := time.Now().UnixNano() + 10*time.Second.Nanoseconds()
+		for MD5Sum, TimestampStr := range PacketTimestamp {
+			Timestamp, err := strconv.ParseInt(TimestampStr, 10, 64)
+			if err != nil {
+				log.Fatal(err)
+				delete(PacketTimestamp, MD5Sum)
+				delete(PacketCount, MD5Sum)
+			}
+			if Timestamp < TimeOutTime {
+				delete(PacketTimestamp, MD5Sum)
+				delete(PacketCount, MD5Sum)
+			}
+		}
+		time.Sleep(10 * time.Second)
+	}
+}
 func TXHandleDirectly(handle *pcap.Handle, dstliststr string, TXdata map[string]string) {
 	TXdata["TTL"] = "1"
 	SendJson, err := json.Marshal(TXdata)
@@ -172,6 +189,11 @@ func recv(handle *pcap.Handle) {
 	}
 }
 func ProcessRXData(RXdata map[string]string) {
+	PacketCountInt, ok := PacketCount[RXdata["MD5Sum"]]
+	if ok && PacketCountInt == -1 {
+		//ignore unexpect packet
+		return
+	}
 	DataBuffer, ok := PacketBuffer[RXdata["MD5Sum"]]
 	if !ok {
 		PacketTimestamp[RXdata["MD5Sum"]] = RXdata["Timestamp"]
@@ -201,8 +223,7 @@ func ProcessRXData(RXdata map[string]string) {
 			}
 			log.Println(string(ByteData))
 			delete(PacketBuffer, RXdata["MD5Sum"])
-			delete(PacketTimestamp, RXdata["MD5Sum"])
-			delete(PacketCount, RXdata["MD5Sum"])
+			PacketCount[RXdata["MD5Sum"]] = -1
 			delete(PacketTotal, RXdata["MD5Sum"])
 		}
 	} else {
@@ -223,8 +244,7 @@ func ProcessRXData(RXdata map[string]string) {
 			}
 			log.Println(string(ByteData))
 			delete(PacketBuffer, RXdata["MD5Sum"])
-			delete(PacketTimestamp, RXdata["MD5Sum"])
-			delete(PacketCount, RXdata["MD5Sum"])
+			PacketCount[RXdata["MD5Sum"]] = -1
 			delete(PacketTotal, RXdata["MD5Sum"])
 		}
 	}
