@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"hash"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
@@ -47,20 +48,7 @@ func main() {
 	v6only = false
 	AddressKey = make(map[string]string)
 	//init Address Pool
-	NetworkPWD = "password"
-	MyPWD = "password"
-	AddMyAddress("dddd:1234:5678::2", NetworkPWD)
-	AddMyAddress("dddd:1234:5678::3", NetworkPWD)
-	AddMyAddress("dddd:1234:5678::4", NetworkPWD)
-	AddMyAddress("dddd:1234:5678::5", NetworkPWD)
-	AddMyAddress("192.168.168.2", NetworkPWD)
-	AddMyAddress("192.168.168.3", NetworkPWD)
-	AddMyAddress("192.168.168.4", NetworkPWD)
-	AddMyAddress("192.168.168.5", NetworkPWD)
-	AddPeerAddress("dddd:1234:5678::3", NetworkPWD)
-	AddPeerAddress("dddd:1234:5678::4", NetworkPWD)
-	AddPeerAddress("192.168.168.3", NetworkPWD)
-	AddPeerAddress("192.168.168.4", NetworkPWD)
+	GetConfig()
 	handle := IfSelect()
 
 	if v6only {
@@ -71,6 +59,81 @@ func main() {
 	TX(handle)
 	defer handle.Close()
 }
+func GetConfig() {
+	Config := make(map[string]string)
+	if FileExists("config.json") {
+		contents, err := ioutil.ReadFile("config.json")
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = json.Unmarshal(contents, &Config)
+		if err != nil {
+			log.Fatal(err)
+		}
+		NetworkPWD = Config["NetworkPWD"]
+		MyPWD = Config["MyPWD"]
+		if strings.Contains(Config["V6Only"], "t") || strings.Contains(Config["V6Only"], "T") {
+			v6only = true
+		} else {
+			v6only = false
+		}
+		PeerPoolStr := Config["PeerPool"]
+		PeerPool := strings.Split(PeerPoolStr, ",")
+		for _, Peer := range PeerPool {
+			if v6only && !IsIPv6Addr(Peer) {
+				continue
+			}
+			AddPeerAddress(Peer, NetworkPWD)
+		}
+	} else {
+		NetworkPWD = GetInput("network password")
+		MyPWD = GetInput("local password")
+		Config["NetworkPWD"] = NetworkPWD
+		Config["MyPWD"] = MyPWD
+		Input := GetInput("V6 Only(y/n)?")
+		if strings.Contains(Input, "y") || strings.Contains(Input, "Y") {
+			v6only = true
+			Config["V6Only"] = "true"
+		} else {
+			Config["V6Only"] = "false"
+			v6only = false
+		}
+		Config["PeerPool"] = ""
+		for {
+			Input = GetInput("Peer IP")
+			if Input == "" {
+				break
+			}
+		}
+		Config["PeerPool"] = strings.Trim(Config["PeerPool"], ",")
+		PeerPool := strings.Split(Config["PeerPool"], ",")
+		for _, Peer := range PeerPool {
+			if v6only && !IsIPv6Addr(Peer) {
+				continue
+			}
+			AddPeerAddress(Peer, NetworkPWD)
+		}
+		ConfJson, err := json.Marshal(Config)
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = ioutil.WriteFile("config.json", ConfJson, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+func FileExists(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsExist(err) {
+			return true
+		}
+		return false
+	}
+	return true
+}
+
 func CleanBuffer() {
 	for {
 		TimeOutTime := time.Now().UnixNano() + 10*time.Second.Nanoseconds()
