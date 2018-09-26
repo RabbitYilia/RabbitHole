@@ -15,6 +15,9 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"os/exec"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +28,7 @@ import (
 	aead "golang.org/x/crypto/chacha20poly1305"
 )
 
+var V4GateWay string
 var MyMacAddrs map[string]string
 var AddressKey map[string]string
 var AddressPoolv6 []string
@@ -79,6 +83,9 @@ func GetConfig() {
 		} else {
 			v6only = false
 		}
+		if !v6only {
+			V4GateWay = Config["V4GateWay"]
+		}
 		PeerPoolStr := Config["PeerPool"]
 		PeerPool := strings.Split(PeerPoolStr, ",")
 		for _, Peer := range PeerPool {
@@ -90,6 +97,7 @@ func GetConfig() {
 	} else {
 		NetworkPWD = GetInput("network password")
 		MyPWD = GetInput("local password")
+
 		Config["NetworkPWD"] = NetworkPWD
 		Config["MyPWD"] = MyPWD
 		Input := GetInput("V6 Only(y/n)?")
@@ -100,6 +108,10 @@ func GetConfig() {
 			Config["V6Only"] = "false"
 			v6only = false
 		}
+		if !v6only {
+			V4GateWay = GetInput("V4 Gateway")
+			Config["V4GateWay"] = V4GateWay
+		}
 		Config["PeerPool"] = ""
 		for {
 			Input = GetInput("Peer IP")
@@ -108,6 +120,7 @@ func GetConfig() {
 			}
 			Config["PeerPool"] += Input + ","
 		}
+
 		Config["PeerPool"] = strings.Trim(Config["PeerPool"], ",")
 		PeerPool := strings.Split(Config["PeerPool"], ",")
 		for _, Peer := range PeerPool {
@@ -492,7 +505,16 @@ func MakePacketv4(data []byte, SrcIPv4 string, DstIPv4 string) []byte {
 		log.Fatal(err)
 	}
 	EtherLayer.SrcMAC = SrcMAC
-	EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
+	DstMacList := GetMacFromARPv4(V4GateWay)
+	if len(DstMacList) == 0 {
+		EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
+	} else {
+		DstMAC, err := net.ParseMAC(DstMacList[0])
+		if err != nil {
+			log.Fatal(err)
+		}
+		EtherLayer.DstMAC = DstMAC
+	}
 	EtherLayer.EthernetType = layers.EthernetTypeIPv4
 	//UDP Layer
 	UDPLayer := &layers.UDP{}
@@ -770,4 +792,20 @@ func getMacAddrs() {
 			}
 		}
 	}
+}
+func GetMacFromARPv4(ip string) []string {
+	if runtime.GOOS == "windows" {
+		exec.Command("ping", "-n", "1", ip)
+	} else {
+		exec.Command("ping", "-c", "1", ip)
+	}
+	cmd := exec.Command("arp", "-a", ip)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Fatal(err)
+	}
+	OutString := string(out)
+	MacRegexp := regexp.MustCompile(`([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})`)
+	match := MacRegexp.FindAllString(OutString, -1)
+	return match
 }
