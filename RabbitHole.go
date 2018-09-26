@@ -29,6 +29,9 @@ import (
 )
 
 var V4GateWay string
+var V6GateWay string
+var V4GateWayMAC []string
+var V6GateWayMAC []string
 var MyMacAddrs map[string]string
 var AddressKey map[string]string
 var AddressPoolv6 []string
@@ -86,6 +89,7 @@ func GetConfig() {
 		if !v6only {
 			V4GateWay = Config["V4GateWay"]
 		}
+		V6GateWay = Config["V6GateWay"]
 		PeerPoolStr := Config["PeerPool"]
 		PeerPool := strings.Split(PeerPoolStr, ",")
 		for _, Peer := range PeerPool {
@@ -112,6 +116,8 @@ func GetConfig() {
 			V4GateWay = GetInput("V4 Gateway")
 			Config["V4GateWay"] = V4GateWay
 		}
+		V4GateWay = GetInput("V6 Gateway")
+		Config["V6GateWay"] = V6GateWay
 		Config["PeerPool"] = ""
 		for {
 			Input = GetInput("Peer IP")
@@ -505,11 +511,10 @@ func MakePacketv4(data []byte, SrcIPv4 string, DstIPv4 string) []byte {
 		log.Fatal(err)
 	}
 	EtherLayer.SrcMAC = SrcMAC
-	DstMacList := GetMacFromARPv4(V4GateWay)
-	if len(DstMacList) == 0 {
+	if len(V4GateWayMAC) == 0 {
 		EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
 	} else {
-		DstMAC, err := net.ParseMAC(DstMacList[0])
+		DstMAC, err := net.ParseMAC(V4GateWayMAC[RandInt(0, len(V4GateWayMAC)-1)])
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -552,7 +557,15 @@ func MakePacketv6(data []byte, SrcIPv6 string, DstIPv6 string) []byte {
 		log.Fatal(err)
 	}
 	EtherLayer.SrcMAC = SrcMAC
-	EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
+	if len(V6GateWayMAC) == 0 {
+		EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
+	} else {
+		DstMAC, err := net.ParseMAC(V6GateWayMAC[RandInt(0, len(V6GateWayMAC)-1)])
+		if err != nil {
+			log.Fatal(err)
+		}
+		EtherLayer.DstMAC = DstMAC
+	}
 	EtherLayer.EthernetType = layers.EthernetTypeIPv6
 	//UDP Layer
 	UDPLayer := &layers.UDP{}
@@ -720,6 +733,10 @@ func IfSelect() *pcap.Handle {
 		log.Println("Listen on :" + thisaddr)
 	}
 	getMacAddrs()
+	if !v6only {
+		V4GateWayMAC = GetMacFromARPv4(V4GateWay)
+	}
+	V6GateWayMAC = GetV6GateWayMac(V6GateWay)
 	handle, err := pcap.OpenLive(selectediface, 40960, true, time.Millisecond)
 	if err != nil {
 		log.Fatal(err)
@@ -808,4 +825,42 @@ func GetMacFromARPv4(ip string) []string {
 	MacRegexp := regexp.MustCompile(`([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})`)
 	match := MacRegexp.FindAllString(OutString, -1)
 	return match
+}
+
+func GetV6GateWayMac(ip string) []string {
+	//Have bug:if have multiple gateway
+	var ReturnValue []string
+	if runtime.GOOS == "windows" {
+		exec.Command("ping", "-6", "-n", "1", ip)
+	} else {
+		exec.Command("ping", "-6", "-c", "1", ip)
+	}
+	OutString := ""
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("netsh", "interface", "ipv6", "show", "neighbors")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Fatal(err)
+		}
+		OutString = string(out)
+		re, _ := regexp.Compile(`[^\x00-\xff]`)
+		OutString := re.ReplaceAllString(OutString, "")
+		log.Println(OutString)
+		MacRegexp := regexp.MustCompile(`([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})[ A-Za-z0-9]*\(`)
+		ReturnValue = MacRegexp.FindAllString(OutString, -1)
+		for item := range ReturnValue {
+			ReturnValue[item] = strings.Replace(ReturnValue[item], " ", "", -1)
+			ReturnValue[item] = strings.Replace(ReturnValue[item], "(", "", -1)
+		}
+	} else {
+		cmd := exec.Command("ip", "-6", "neighbor", "show")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Fatal(err)
+		}
+		OutString = string(out)
+		MacRegexp := regexp.MustCompile(`([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})[ A-Za-z0-9]*router REACHABLE`)
+		ReturnValue = MacRegexp.FindAllString(OutString, -1)
+	}
+	return ReturnValue
 }
