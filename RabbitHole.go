@@ -845,7 +845,6 @@ func GetV6GateWayMac(ip string) []string {
 		OutString = string(out)
 		re, _ := regexp.Compile(`[^\x00-\xff]`)
 		OutString := re.ReplaceAllString(OutString, "")
-		log.Println(OutString)
 		MacRegexp := regexp.MustCompile(`([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})[ A-Za-z0-9]*\(`)
 		ReturnValue = MacRegexp.FindAllString(OutString, -1)
 		for item := range ReturnValue {
