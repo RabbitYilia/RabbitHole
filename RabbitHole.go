@@ -25,6 +25,7 @@ import (
 	aead "golang.org/x/crypto/chacha20poly1305"
 )
 
+var MyMacAddrs map[string]string
 var AddressKey map[string]string
 var AddressPoolv6 []string
 var AddressPoolv4 []string
@@ -40,6 +41,7 @@ var PacketCount map[string]int
 var PacketTotal map[string]int
 
 func main() {
+	MyMacAddrs = make(map[string]string)
 	PacketBuffer = make(map[string][]string)
 	PacketTimestamp = make(map[string]string)
 	PacketCount = make(map[string]int)
@@ -104,6 +106,7 @@ func GetConfig() {
 			if Input == "" {
 				break
 			}
+			Config["PeerPool"] += Input + ","
 		}
 		Config["PeerPool"] = strings.Trim(Config["PeerPool"], ",")
 		PeerPool := strings.Split(Config["PeerPool"], ",")
@@ -479,7 +482,11 @@ func MakePacketv4(data []byte, SrcIPv4 string, DstIPv4 string) []byte {
 	ipv4Layer.Checksum = checkSum(v4package[:20])
 	//EtherNet Layer
 	EtherLayer := &layers.Ethernet{}
-	EtherLayer.SrcMAC = net.HardwareAddr{0x00, 0xAA, 0xFA, 0xAA, 0xFF, 0xAA}
+	SrcMAC, err := net.ParseMAC(MyMacAddrs[SrcIPv4])
+	if err != nil {
+		log.Fatal(err)
+	}
+	EtherLayer.SrcMAC = SrcMAC
 	EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
 	EtherLayer.EthernetType = layers.EthernetTypeIPv4
 	//UDP Layer
@@ -513,7 +520,11 @@ func MakePacketv6(data []byte, SrcIPv6 string, DstIPv6 string) []byte {
 	ipv6Layer.NextHeader = layers.IPProtocolUDP
 	//EtherNet Layer
 	EtherLayer := &layers.Ethernet{}
-	EtherLayer.SrcMAC = net.HardwareAddr{0x00, 0xAA, 0xFA, 0xAA, 0xFF, 0xAA}
+	SrcMAC, err := net.ParseMAC(MyMacAddrs[SrcIPv6])
+	if err != nil {
+		log.Fatal(err)
+	}
+	EtherLayer.SrcMAC = SrcMAC
 	EtherLayer.DstMAC = net.HardwareAddr{0xBD, 0xBD, 0xBD, 0xBD, 0xBD, 0xBD}
 	EtherLayer.EthernetType = layers.EthernetTypeIPv6
 	//UDP Layer
@@ -681,7 +692,7 @@ func IfSelect() *pcap.Handle {
 		AddMyAddress(thisaddr, NetworkPWD)
 		log.Println("Listen on :" + thisaddr)
 	}
-
+	getMacAddrs()
 	handle, err := pcap.OpenLive(selectediface, 40960, true, time.Millisecond)
 	if err != nil {
 		log.Fatal(err)
@@ -724,4 +735,34 @@ func geratenonce() []byte {
 	hash := sha256.New()
 	hash.Write([]byte(strconv.Itoa(int(time.Now().Unix()/300) * 300)))
 	return hash.Sum(nil)[:12]
+}
+func getMacAddrs() {
+	netInterfaces, err := net.Interfaces()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	for _, netInterface := range netInterfaces {
+		thisIPAddrs, err := netInterface.Addrs()
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+		if len(thisIPAddrs) == 0 {
+			continue
+		}
+		macAddr := netInterface.HardwareAddr.String()
+		if len(macAddr) == 0 {
+			continue
+		}
+		for _, IPAddr := range thisIPAddrs {
+			_, ok := AddressKey[strings.Split(IPAddr.String(), "/")[0]]
+			if !ok {
+				continue
+			} else {
+				MyMacAddrs[strings.Split(IPAddr.String(), "/")[0]] = macAddr
+			}
+		}
+	}
 }
