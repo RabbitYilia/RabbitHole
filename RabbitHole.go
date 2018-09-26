@@ -322,6 +322,8 @@ func recv(handle *pcap.Handle) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	SrcIP := ""
+	DstIP := ""
 	for packet := range packetSource.Packets() {
 		ipv6Layer := packet.Layer(layers.LayerTypeIPv6)
 		if ipv6Layer != nil {
@@ -331,7 +333,8 @@ func recv(handle *pcap.Handle) {
 				//Not Mine
 			} else {
 				Payload = ipv6Layer.LayerPayload()[8:]
-				log.Printf("From %s to %s\n", ipv6.SrcIP, ipv6.DstIP)
+				SrcIP = ipv6.SrcIP.String()
+				DstIP = ipv6.DstIP.String()
 			}
 		}
 		ipv4Layer := packet.Layer(layers.LayerTypeIPv4)
@@ -342,7 +345,8 @@ func recv(handle *pcap.Handle) {
 				//Not Mine
 			} else {
 				Payload = ipv4Layer.LayerPayload()[8:]
-				log.Printf("From %s to %s\n", ipv4.SrcIP, ipv4.DstIP)
+				SrcIP = ipv4.SrcIP.String()
+				DstIP = ipv4.DstIP.String()
 			}
 		}
 		Payload, err = ciper.Open(nil, geratenonce(), Payload, nil)
@@ -353,6 +357,7 @@ func recv(handle *pcap.Handle) {
 		if err != nil {
 			continue
 		}
+		log.Printf("From %s to %s\n", SrcIP, DstIP)
 		if RXdata["TTL"] == "1" {
 			log.Println("My Packet,Process")
 			ProcessRXData(RXdata)
