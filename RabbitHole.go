@@ -674,6 +674,10 @@ func IfSelect() *pcap.Handle {
 		if !IsIPv6Addr(thisaddr) && v6only {
 			continue
 		}
+		//ignore local address
+		if strings.Contains(thisaddr, "fe80") {
+			continue
+		}
 		AddMyAddress(thisaddr, NetworkPWD)
 		log.Println("Listen on :" + thisaddr)
 	}
