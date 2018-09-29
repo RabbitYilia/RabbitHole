@@ -101,7 +101,7 @@ func GetConfig() {
 			V4GateWay = GetInput("V4 Gateway")
 			Config["V4GateWay"] = V4GateWay
 		}
-		V4GateWay = GetInput("V6 Gateway")
+		V6GateWay = GetInput("V6 Gateway")
 		Config["V6GateWay"] = V6GateWay
 		ConfJson, err := json.Marshal(Config)
 		if err != nil {
