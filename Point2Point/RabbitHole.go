@@ -148,11 +148,6 @@ func TX(handle *pcap.Handle) {
 		handle.Close()
 		return
 	}
-	dstkey := GetInput("dstkey")
-	if dstkey == "" {
-		handle.Close()
-		return
-	}
 	for {
 		PreSlicedData := []byte(GetInput("data"))
 		if len(PreSlicedData) == 0 {
