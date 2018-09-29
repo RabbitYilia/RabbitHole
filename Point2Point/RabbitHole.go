@@ -709,6 +709,9 @@ func GetV6GateWayMac(ip string) []string {
 		OutString = string(out)
 		MacRegexp := regexp.MustCompile(`([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})[ A-Za-z0-9]*router REACHABLE`)
 		ReturnValue = MacRegexp.FindAllString(OutString, -1)
+		for item := range ReturnValue {
+			ReturnValue[item] = strings.Replace(ReturnValue[item], " router REACHABLE", "", -1)
+		}
 	}
 	return ReturnValue
 }
