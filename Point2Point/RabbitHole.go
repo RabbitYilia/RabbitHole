@@ -164,7 +164,7 @@ func TX(handle *pcap.Handle) {
 			TXdata["Timestamp"] = Timestamp
 			TXdata["MD5Sum"] = MD5Sum
 			TXdata["PiecedMsg"] = PiecedMsg
-			TXHandleDirectly(handle, TXdata["DstIP"], TXdata)
+			TXHandleDirectly(handle, dst, TXdata)
 		}
 	}
 }
