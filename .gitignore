@@ -1,2 +1,4 @@
 *.exe 
 config.json
+x86
+x86_64
