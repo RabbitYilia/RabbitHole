@@ -283,11 +283,21 @@ func ProcessRX(Handle uintptr, RXPacket []byte, RXAddr WinDivertAddress) {
 			if TTL == 1 {
 				ProcessRXData(RXdata)
 			} else {
+				SrcPort := RandInt(1, 65535)
+				DstPort := RandInt(1, 65535)
+				buffer := gopacket.NewSerializeBuffer()
+				options := gopacket.SerializeOptions{}
 				RXdata["TTL"] = strconv.Itoa(TTL - 1)
 				TXJson, err := json.Marshal(RXdata)
 				if err != nil {
 					log.Fatal(err)
 				}
+
+				TXAddr := WinDivertAddress{}
+				TXAddr.Data = 0
+				TXAddr.IfIdx = 0
+				TXAddr.SubIfIdx = 0
+				TXAddr.Timestamp = time.Now().UnixNano() * 100
 
 				UDPLayer := &layers.UDP{}
 				UDPLayer.SrcPort = layers.UDPPort(SrcPort)
