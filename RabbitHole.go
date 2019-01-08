@@ -423,6 +423,7 @@ func SeekInterfaces() {
 				}
 			}
 			listenFlag = true
+			log.Printf("Listen on:%s@%s\n", address.IP.String(), device.Description)
 			if strings.Contains(strings.Split(address.IP.String(), "/")[0], ".") {
 				IfIPv4Map[address.IP.String()] = device.Name
 				Srcv4Map = append(Srcv4Map, address.IP)
