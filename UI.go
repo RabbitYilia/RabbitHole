@@ -124,7 +124,7 @@ func SetDestIP() {
 						tui.NewLabel(e.Text()),
 						tui.NewLabel("IPv4"),
 					)
-					Srcv4Map = append(Srcv4Map, IP)
+					Dstv4Map = append(Dstv4Map, IP)
 				}
 			} else {
 				if len(Srcv6Map) != 0 {
@@ -132,7 +132,7 @@ func SetDestIP() {
 						tui.NewLabel(e.Text()),
 						tui.NewLabel("IPv6"),
 					)
-					Srcv6Map = append(Srcv6Map, IP)
+					Dstv6Map = append(Dstv6Map, IP)
 				}
 			}
 		}
