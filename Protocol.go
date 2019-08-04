@@ -18,7 +18,7 @@ type Protocol struct {
 func ProcessData(Data *Protocol) {
 	_, Exist := ProtocolBuffer[Data.MD5Sum]
 	if !Exist {
-		ProtocolBuffer[Data.MD5Sum] = make([]string, Data.TotalPiece)
+		ProtocolBuffer[Data.MD5Sum] = make([]string, Data.TotalPiece+1)
 		ProtocolBuffer[Data.MD5Sum][Data.PieceNo] = Data.PieceData
 		ProtocolBufferCount[Data.MD5Sum] = 1
 		go func() {
