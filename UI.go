@@ -158,10 +158,6 @@ func SetDestIP() {
 }
 
 func ShowChat(Handle uintptr) {
-	go PXLoop(Handle)
-	go RXLoop(Handle)
-	go TXLoop(Handle)
-
 	RXHeader := tui.NewTable(0, 0)
 	RXHeader.SetFocused(false)
 	RXHeader.AppendRow(tui.NewLabel("RX:"))
@@ -210,6 +206,10 @@ func ShowChat(Handle uintptr) {
 	})
 
 	ui.SetKeybinding("Esc", func() { ui.Quit() })
+
+	go PXLoop(Handle)
+	go RXLoop(Handle)
+	go TXLoop(Handle)
 
 	if err := ui.Run(); err != nil {
 		log.Fatal(err)
