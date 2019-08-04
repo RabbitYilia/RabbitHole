@@ -23,6 +23,12 @@ func ProcessData(Data *Protocol) {
 		ProtocolBufferCount[Data.MD5Sum] = 1
 		go func() {
 			time.Sleep(10 * time.Second)
+			if ProtocolBufferCount[Data.MD5Sum] != 0 {
+				ContentBox := tui.NewVBox(tui.NewLabel(time.Now().Format("15:04:05") + " [RX] " + fmt.Sprintf("[%s]", Data.MD5Sum)))
+				ContentBox.Append(tui.NewLabel(fmt.Sprintf("[%d/%d]", ProtocolBufferCount[Data.MD5Sum], Data.TotalPiece)))
+				ContentBox.Append(tui.NewLabel("Received In Total,But Timeout."))
+				ContentBox.Append(tui.NewLabel("========================================================================================================================"))
+			}
 			delete(ProtocolBufferCount, Data.MD5Sum)
 			delete(ProtocolBuffer, Data.MD5Sum)
 		}()
@@ -32,12 +38,13 @@ func ProcessData(Data *Protocol) {
 			ProtocolBufferCount[Data.MD5Sum] += 1
 		}
 	}
-	history.Append(tui.NewHBox(
-		tui.NewLabel(time.Now().Format("15:04:05")),
-		tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("[%s][%s/%s] %s => %s", Data.MD5Sum, Data.PieceNo, Data.TotalPiece, Data.SrcIP, Data.DstIP))),
-		tui.NewLabel("Received."),
-		tui.NewSpacer(),
-	))
+
+	ContentBox := tui.NewVBox(tui.NewLabel(time.Now().Format("15:04:05") + " [RX] " + fmt.Sprintf("[%s][%d/%d]", Data.MD5Sum, Data.PieceNo, Data.TotalPiece)))
+	ContentBox.Append(tui.NewLabel(fmt.Sprintf("%s => %s", Data.SrcIP, Data.DstIP)))
+	ContentBox.Append(tui.NewLabel("Received"))
+	ContentBox.Append(tui.NewLabel("========================================================================================================================"))
+	history.Append(ContentBox)
+
 	if ProtocolBufferCount[Data.MD5Sum] == 0 {
 		return
 	}
@@ -46,12 +53,17 @@ func ProcessData(Data *Protocol) {
 		for _, piecedData := range ProtocolBuffer[Data.MD5Sum] {
 			ProtocolData += piecedData
 		}
-		history.Append(tui.NewHBox(
-			tui.NewLabel(time.Now().Format("15:04:05")),
-			tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("[%s][FULL] %s => %s", Data.MD5Sum, Data.SrcIP, Data.DstIP))),
-			tui.NewLabel(ProtocolData),
-			tui.NewSpacer(),
-		))
+
+		ContentBox := tui.NewVBox(tui.NewLabel(time.Now().Format("15:04:05") + " [RX] " + fmt.Sprintf("[%s][FULL]", Data.MD5Sum)))
+		ContentBox.Append(tui.NewLabel(fmt.Sprintf("%s => %s", Data.SrcIP, Data.DstIP)))
+		ContentStr := ProtocolData
+		for len(ContentStr) >= 100 {
+			ContentBox.Append(tui.NewLabel(ContentStr[:100]))
+			ContentStr = ContentStr[100:]
+		}
+		ContentBox.Append(tui.NewLabel(ContentStr))
+		ContentBox.Append(tui.NewLabel("========================================================================================================================"))
+		history.Append(ContentBox)
 		ProtocolBufferCount[Data.MD5Sum] = 0
 	}
 }

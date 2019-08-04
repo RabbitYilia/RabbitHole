@@ -196,12 +196,16 @@ func ShowChat(Handle uintptr) {
 			return
 		}
 		SendText(Handle, e.Text())
-		history.Append(tui.NewHBox(
-			tui.NewLabel(time.Now().Format("15:04:05")),
-			tui.NewPadder(1, 0, tui.NewLabel("[TX]")),
-			tui.NewLabel(e.Text()),
-			tui.NewSpacer(),
-		))
+
+		ContentBox := tui.NewVBox(tui.NewLabel(time.Now().Format("15:04:05") + " [TX]"))
+		ContentStr := e.Text()
+		for len(ContentStr) >= 100 {
+			ContentBox.Append(tui.NewLabel(ContentStr[:100]))
+			ContentStr = ContentStr[100:]
+		}
+		ContentBox.Append(tui.NewLabel(ContentStr))
+		ContentBox.Append(tui.NewLabel("========================================================================================================================"))
+		history.Append(ContentBox)
 		input.SetText("")
 	})
 
