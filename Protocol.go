@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/marcusolsson/tui-go"
+	"log"
 	"time"
 )
+
+var ProtocolBuffer map[string][]string
+var ProtocolBufferCount map[string]uint
 
 type Protocol struct {
 	SrcIP      string
@@ -24,10 +27,10 @@ func ProcessData(Data *Protocol) {
 		go func() {
 			time.Sleep(10 * time.Second)
 			if ProtocolBufferCount[Data.MD5Sum] != 0 {
-				ContentBox := tui.NewVBox(tui.NewLabel(time.Now().Format("15:04:05") + " [RX] " + fmt.Sprintf("[%s]", Data.MD5Sum)))
-				ContentBox.Append(tui.NewLabel(fmt.Sprintf("[%d/%d]", ProtocolBufferCount[Data.MD5Sum], Data.TotalPiece)))
-				ContentBox.Append(tui.NewLabel("Received In Total,But Timeout."))
-				ContentBox.Append(tui.NewLabel("========================================================================================================================"))
+				log.Println("[RX]" + fmt.Sprintf("[%s]", Data.MD5Sum))
+				log.Println(fmt.Sprintf("[%d/%d]", ProtocolBufferCount[Data.MD5Sum], Data.TotalPiece))
+				log.Println("Received In Total,But Timeout.")
+				log.Println("========================================================================================================================")
 			}
 			delete(ProtocolBufferCount, Data.MD5Sum)
 			delete(ProtocolBuffer, Data.MD5Sum)
@@ -39,11 +42,10 @@ func ProcessData(Data *Protocol) {
 		}
 	}
 
-	ContentBox := tui.NewVBox(tui.NewLabel(time.Now().Format("15:04:05") + " [RX] " + fmt.Sprintf("[%s][%d/%d]", Data.MD5Sum, Data.PieceNo, Data.TotalPiece)))
-	ContentBox.Append(tui.NewLabel(fmt.Sprintf("%s => %s", Data.SrcIP, Data.DstIP)))
-	ContentBox.Append(tui.NewLabel("Received"))
-	ContentBox.Append(tui.NewLabel("========================================================================================================================"))
-	history.Append(ContentBox)
+	log.Println("[RX]" + fmt.Sprintf("[%s][%d/%d]", Data.MD5Sum, Data.PieceNo, Data.TotalPiece))
+	log.Println(fmt.Sprintf("%s => %s", Data.SrcIP, Data.DstIP))
+	log.Println("Received")
+	log.Println("========================================================================================================================")
 
 	if ProtocolBufferCount[Data.MD5Sum] == 0 {
 		return
@@ -54,16 +56,10 @@ func ProcessData(Data *Protocol) {
 			ProtocolData += piecedData
 		}
 
-		ContentBox := tui.NewVBox(tui.NewLabel(time.Now().Format("15:04:05") + " [RX] " + fmt.Sprintf("[%s][FULL]", Data.MD5Sum)))
-		ContentBox.Append(tui.NewLabel(fmt.Sprintf("%s => %s", Data.SrcIP, Data.DstIP)))
-		ContentStr := ProtocolData
-		for len(ContentStr) >= 100 {
-			ContentBox.Append(tui.NewLabel(ContentStr[:100]))
-			ContentStr = ContentStr[100:]
-		}
-		ContentBox.Append(tui.NewLabel(ContentStr))
-		ContentBox.Append(tui.NewLabel("========================================================================================================================"))
-		history.Append(ContentBox)
+		log.Println("[RX]" + fmt.Sprintf("[%s][FULL]", Data.MD5Sum))
+		log.Println(fmt.Sprintf("%s => %s", Data.SrcIP, Data.DstIP))
+		log.Println(ProtocolData)
+		log.Println("========================================================================================================================")
 		ProtocolBufferCount[Data.MD5Sum] = 0
 	}
 }
